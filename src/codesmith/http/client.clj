@@ -3,12 +3,12 @@
             [clojure.core.reducers :as r]
             [cheshire.core :as json]
             [clojure.java.io :as io])
-  (:import [java.net.http HttpClient HttpClient$Version HttpRequest HttpResponse$BodyHandlers HttpClient$Redirect HttpResponse HttpRequest$BodyPublisher HttpRequest$BodyPublishers HttpRequest$Builder HttpResponse$BodyHandler HttpHeaders]
+  (:import [java.net.http HttpClient$Version HttpRequest HttpResponse$BodyHandlers HttpClient$Redirect HttpResponse HttpRequest$BodyPublisher HttpRequest$BodyPublishers HttpRequest$Builder HttpResponse$BodyHandler HttpHeaders]
            [java.net URI]
            [clojure.lang Keyword]
            [java.io File]
            [java.nio.charset Charset]
-           [java.util Map Map$Entry List])
+           [java.util Map$Entry List])
   (:refer-clojure :exclude [get]))
 
 (set! *warn-on-reflection* true)
@@ -59,28 +59,7 @@
       (. ~builder ~(symbol method) value#)
       ~builder)))
 
-(defn http-client ^HttpClient [& [{:keys [authenticator
-                                          connect-timeout
-                                          cookie-handler
-                                          executor
-                                          follow-redirects
-                                          priority
-                                          proxy
-                                          ssl-context
-                                          ssl-parameters
-                                          version]}]]
-  (let [builder (HttpClient/newBuilder)
-        builder (dot-builder-if builder :authenticator authenticator)
-        builder (dot-builder-if builder :connectTimeout connect-timeout)
-        builder (dot-builder-if builder :cookieHandler cookie-handler)
-        builder (dot-builder-if builder :executor executor)
-        builder (dot-builder-if builder :followRedirects to-follow-redirects follow-redirects)
-        builder (dot-builder-if builder :priority priority)
-        builder (dot-builder-if builder :proxy proxy)
-        builder (dot-builder-if builder :sslContext ssl-context)
-        builder (dot-builder-if builder :sslParameters ssl-parameters)
-        builder (dot-builder-if builder :version to-version version)]
-    (.build builder)))
+
 
 (defprotocol ToCharset
   (to-charset ^Charset [self]))
@@ -292,17 +271,57 @@
    :body    (.body raw-response)
    :headers (convert-headers (.headers raw-response))})
 
-(defn request [^HttpClient client r]
-  (let [r                         (execute [uri-interceptor method-interceptor headers-interceptor] r)
+
+
+(defrecord HttpClient [^java.net.http.HttpClient http-client request-interceptors response-interceptors])
+
+(def default-request-interceptors
+  [uri-interceptor method-interceptor headers-interceptor])
+
+(def default-response-interceptors
+  [])
+
+(defn http-client [& [{:keys [authenticator
+                              connect-timeout
+                              cookie-handler
+                              executor
+                              follow-redirects
+                              priority
+                              proxy
+                              ssl-context
+                              ssl-parameters
+                              version
+                              request-interceptors
+                              response-interceptors]}]]
+  (let [builder (java.net.http.HttpClient/newBuilder)
+        builder (dot-builder-if builder :authenticator authenticator)
+        builder (dot-builder-if builder :connectTimeout connect-timeout)
+        builder (dot-builder-if builder :cookieHandler cookie-handler)
+        builder (dot-builder-if builder :executor executor)
+        builder (dot-builder-if builder :followRedirects to-follow-redirects follow-redirects)
+        builder (dot-builder-if builder :priority priority)
+        builder (dot-builder-if builder :proxy proxy)
+        builder (dot-builder-if builder :sslContext ssl-context)
+        builder (dot-builder-if builder :sslParameters ssl-parameters)
+        builder (dot-builder-if builder :version to-version version)]
+    (->HttpClient
+      (.build builder)
+      (or request-interceptors default-request-interceptors)
+      (or response-interceptors default-response-interceptors))))
+
+(defn request [{:keys [^java.net.http.HttpClient http-client
+                       request-interceptors
+                       response-interceptors]} r]
+  (let [r                         (execute request-interceptors r)
         ^HttpRequest http-request (::request r)
         body-handler              (to-body-handler (or (:as r) :string))
-        raw-response              (.send client http-request body-handler)]
+        raw-response              (.send http-client http-request body-handler)]
     (if (:raw-response? r)
       raw-response
       (convert-raw-response raw-response))))
 
 
-(defn get [^HttpClient client uri & [r]]
+(defn get [^java.net.http.HttpClient client uri & [r]]
   (request client (merge {:method :get :uri uri} r)))
 
 (comment
