@@ -2,20 +2,18 @@
   (:require [codesmith.http.client.coercion :as c]
             [codesmith.http.client.interceptor.request :as ireq]
             [codesmith.http.client.interceptor.response :as ires]
-            [codesmith.http.client.interceptor.others :as ioth]
+            [codesmith.http.client.interceptor.dual :as dual]
             [codesmith.http.client.utils :as u])
-  (:import [java.net.http HttpRequest HttpClient$Builder])
-  (:refer-clojure :exclude [get]))
-
-(set! *warn-on-reflection* true)
+  (:import [java.net.http HttpRequest HttpClient$Builder HttpResponse$BodyHandlers])
+  (:refer-clojure :exclude [get send]))
 
 (defrecord HttpClient [^java.net.http.HttpClient http-client request-interceptors response-interceptors])
 
 (def default-request-interceptors
-  [ireq/uri-interceptor ireq/method-interceptor ireq/headers-interceptor ioth/measuring-interceptor])
+  [ireq/uri-interceptor ireq/method-interceptor ireq/headers-interceptor dual/measuring-interceptor])
 
 (def default-response-interceptors
-  [ires/status-interceptor ires/headers-full-conversion-interceptor ires/body-interceptor ioth/measuring-interceptor])
+  [ires/status-interceptor ires/headers-full-conversion-interceptor ires/body-interceptor dual/measuring-interceptor])
 
 (defn http-client [& [{:keys [authenticator
                               connect-timeout
@@ -45,32 +43,29 @@
       (or request-interceptors default-request-interceptors)
       (or response-interceptors default-response-interceptors))))
 
-(defn request [{:keys [^java.net.http.HttpClient http-client
+(defn send [{:keys [^java.net.http.HttpClient http-client
                        request-interceptors
                        response-interceptors]} r]
   (let [request-map               (ireq/execute-enter request-interceptors r)
         ^HttpRequest http-request (::ireq/raw-request request-map)
-        body-handler              (c/to-body-handler (or (:as request-map) :string))
+        body-handler              (or (:body-handler request-map) (HttpResponse$BodyHandlers/ofString))
         raw-response              (.send http-client http-request body-handler)]
     (if (::ireq/raw-response? request-map)
       raw-response
       (ires/execute-leave response-interceptors request-map raw-response))))
 
 
-(defn get [^java.net.http.HttpClient client uri & [r]]
-  (request client (merge {:method :get :uri uri} r)))
+(defn get [client uri & [r]]
+  (send client (merge {:method :get :uri uri} r)))
 
-(comment
-  (def client (http-client {:follow-redirects :redirect-normal
-                            :version          :version-http-2}))
+(defn head [client uri & [r]]
+  (send client (merge {:method :head :uri uri} r)))
 
+(defn post [client uri & [r]]
+  (send client (merge {:method :post :uri uri} r)))
 
-  (get client "https://www.google.com")
-  (get-in [:headers "cache-control"])
-  (def headers (:headers *1))
-  (.firstValue headers "Cache-Control")
-  (.get (.map headers) "status")
-  (map identity (.map headers))
+(defn put [client uri & [r]]
+  (send client (merge {:method :put :uri uri} r)))
 
-  (apply sorted-map-by String/CASE_INSENSITIVE_ORDER ["a" 1])
-  )
+(defn delete [client uri & [r]]
+  (send client (merge {:method :delete :uri uri} r)))

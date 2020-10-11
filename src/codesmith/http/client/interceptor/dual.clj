@@ -1,4 +1,4 @@
-(ns codesmith.http.client.interceptor.others
+(ns codesmith.http.client.interceptor.dual
   (:require [codesmith.http.client.interceptor.request :as ireq]
             [codesmith.http.client.interceptor.response :as ires]))
 
@@ -17,10 +17,3 @@
         ::time-elpased (- measuring-end measuring-start)))))
 
 (def measuring-interceptor (->MeasuringInterceptor))
-
-(comment
-  (satisfies? ires/ResponseInterceptor measuring-interceptor)
-
-  (ires/leave measuring-interceptor {::measuring-start 100023123123} nil nil)
-
-  )

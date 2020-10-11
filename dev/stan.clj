@@ -1,33 +1,21 @@
 (ns stan
-  (:require [clj-http.client :as http]
+  (:require [codesmith.http.client :as http]
             [cheshire.core :as json]
-            [clojure.java.io :as io])
-  (:import [java.io ByteArrayOutputStream BufferedWriter OutputStreamWriter]
-           [java.net.http HttpRequest HttpRequest$BodyPublishers]))
+            [clojure.java.io :as io]))
 
-(defmulti test-multi identity)
-
-(defmethod test-multi String
-  [self] self)
-
-(derive :stan/a :stan/b)
-
-(defmethod test-multi :stan/b
-  [self] "Hello")
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
 
 (comment
+  (def client (http/http-client {:follow-redirects :redirect-normal
+                                 :version          :version-http-2}))
 
-  (test-multi :stan/a)
+  (get-in (http/head client "https://www.google.com") [:headers "cache-control"] )
+  (get-in [:headers "cache-control"])
+  (def headers (:headers *1))
+  (.firstValue headers "Cache-Control")
+  (.get (.map headers) "status")
+  (map identity (.map headers))
 
-  (isa? :stan/a :stan/b)
-
-  (http/get "https://google.com")
-
-  (let [baos (ByteArrayOutputStream.)
-        writer (io/writer baos)]
-    (json/generate-stream {:a 1} writer)
-    (HttpRequest$BodyPublishers/ofByteArray (.toByteArray baos)))
-
-
-  (json/generate-stream)
+  (apply sorted-map-by String/CASE_INSENSITIVE_ORDER ["a" 1])
   )

@@ -3,8 +3,7 @@
   (:import [java.net URI]
            [java.nio.charset Charset]
            [clojure.lang Keyword]
-           [java.net.http HttpRequest$BodyPublisher HttpRequest$BodyPublishers HttpResponse$BodyHandler HttpResponse$BodyHandlers HttpClient$Redirect HttpClient$Version]
-           [java.io File]))
+           [java.net.http HttpClient$Redirect HttpClient$Version]))
 
 (defprotocol ToFollowRedirects
   (to-follow-redirects [self]))
@@ -59,19 +58,6 @@
   (to-charset [self]
     (Charset/forName (str/upper-case (name self)))))
 
-(defmulti value-to-mime identity)
-
-(defmacro defmime [keyword value]
-  `(defmethod value-to-mime ~keyword [~'_] ~value))
-
-(defmime :json "application/json")
-
-(defn to-mime [mime]
-  (and mime
-       (if (string? mime)
-         mime
-         (value-to-mime mime))))
-
 (defprotocol ToUri
   (to-uri ^URI [self]))
 
@@ -82,58 +68,3 @@
 (extend-type String
   ToUri
   (to-uri [self] (URI/create self)))
-
-
-
-
-
-
-
-(defprotocol ToMethod
-  (to-method ^String [self]))
-
-(extend-type String
-  ToMethod
-  (to-method [self] self))
-
-(extend-type Keyword
-  ToMethod
-  (to-method [self]
-    (str/upper-case (name self))))
-
-(defprotocol ToBodyPublisher
-  (to-body-publisher ^HttpRequest$BodyPublisher [self]))
-
-(extend-type String
-  ToBodyPublisher
-  (to-body-publisher [self]
-    (HttpRequest$BodyPublishers/ofString self)))
-
-(extend-type File
-  ToBodyPublisher
-  (to-body-publisher [self]
-    (HttpRequest$BodyPublishers/ofFile (.toPath self))))
-
-(extend-type HttpRequest$BodyPublisher
-  ToBodyPublisher
-  (to-body-publisher [self]
-    self))
-
-(extend-type nil
-  ToBodyPublisher
-  (to-body-publisher [self]
-    (HttpRequest$BodyPublishers/noBody)))
-
-(defprotocol ToBodyHandler
-  (to-body-handler [self]))
-
-(extend-type HttpResponse$BodyHandler
-  ToBodyHandler
-  (to-body-handler [self] self))
-
-(extend-type Keyword
-  ToBodyHandler
-  (to-body-handler [self]
-    (case self
-      :string (HttpResponse$BodyHandlers/ofString)
-      :stream (HttpResponse$BodyHandlers/ofInputStream))))

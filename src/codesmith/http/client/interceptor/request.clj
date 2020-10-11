@@ -1,7 +1,8 @@
 (ns codesmith.http.client.interceptor.request
   (:require [codesmith.http.client.coercion :as c]
-            [codesmith.http.client.utils :as u])
-  (:import [java.net.http HttpRequest$Builder HttpRequest]))
+            [codesmith.http.client.body :as body]
+            [codesmith.http.client.utils :refer [some-assoc->]])
+  (:import [java.net.http HttpRequest$Builder HttpRequest HttpRequest$BodyPublishers]))
 
 (defprotocol RequestInterceptor
   ""
@@ -48,9 +49,9 @@
 (deftype HeadersInterceptor []
   RequestInterceptor
   (enter [_ {:keys [accept content-type headers] :as request-map}]
-    (assoc request-map :headers (u/assoc-if headers
-                                            "Accept" (c/to-mime accept)
-                                            "Content-Type" (c/to-mime content-type))))
+    (assoc request-map :headers (some-assoc-> headers
+                                              "Accept" accept
+                                              "Content-Type" content-type)))
   (leave! [_ builder {:keys [headers]}]
     (set-headers builder headers)))
 
@@ -60,33 +61,48 @@
   (leave! [_ builder {:keys [uri]}]
     (.uri ^HttpRequest$Builder builder (c/to-uri uri))))
 
-(deftype MethorInterceptor []
+(defn body-publisher [{:keys [body-publisher]}]
+  (or body-publisher (HttpRequest$BodyPublishers/noBody)))
+
+(deftype MethodInterceptor []
   RequestInterceptor
   (enter [_ request-map] request-map)
   (leave! [_ builder {:keys [method body]}]
     (case method
-      :get (.GET ^HttpRequest$Builder builder)
-      :put (.PUT ^HttpRequest$Builder builder (c/to-body-publisher body))
-      :post (.POST ^HttpRequest$Builder builder (c/to-body-publisher body))
-      :delete (.DELETE ^HttpRequest$Builder builder)
-      (.method ^HttpRequest$Builder builder (c/to-method method) (c/to-body-publisher body)))))
+      ("GET" :get) (.GET ^HttpRequest$Builder builder)
+      ("PUT" :put) (.PUT ^HttpRequest$Builder builder (body-publisher body))
+      ("POST" :post) (.POST ^HttpRequest$Builder builder (body-publisher body))
+      ("DELETE" :delete) (.DELETE ^HttpRequest$Builder builder)
+      (.method ^HttpRequest$Builder builder (.toUpperCase (name method)) (body-publisher body)))))
 
 (deftype JsonInterceptor []
   RequestInterceptor
   (enter [_ request-map]
-    (assoc request-map :as :json
-                       :accept :json
-                       :content-type :json))
+    (assoc request-map :send-as body/send-as-json
+                       :accept-as body/accept-as-json))
+  (leave! [_ _ _]))
+
+(deftype BodyInterceptor []
+  RequestInterceptor
+  (enter [_ {:keys [send-as accept-as] :as request-map}]
+    (cond-> request-map
+            accept-as (assoc :accept (accept-as)
+                             :body-handler accept-as)
+            send-as (assoc :content-type (send-as)
+                           :body-provider (send-as request-map))))
   (leave! [_ _ _]))
 
 (def uri-interceptor
   (->UriInterceptor))
 
+(def body-interceptor
+  (->BodyInterceptor))
+
 (def headers-interceptor
   (->HeadersInterceptor))
 
 (def method-interceptor
-  (->MethorInterceptor))
+  (->MethodInterceptor))
 
 (def json-interceptor
   (->JsonInterceptor))
