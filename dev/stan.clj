@@ -5,7 +5,22 @@
   (:import [java.io ByteArrayOutputStream BufferedWriter OutputStreamWriter]
            [java.net.http HttpRequest HttpRequest$BodyPublishers]))
 
+(defmulti test-multi identity)
+
+(defmethod test-multi String
+  [self] self)
+
+(derive :stan/a :stan/b)
+
+(defmethod test-multi :stan/b
+  [self] "Hello")
+
 (comment
+
+  (test-multi :stan/a)
+
+  (isa? :stan/a :stan/b)
+
   (http/get "https://google.com")
 
   (let [baos (ByteArrayOutputStream.)

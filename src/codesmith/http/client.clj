@@ -1,12 +1,17 @@
 (ns codesmith.http.client
   (:require [clojure.string :as str]
-            [clojure.core.reducers :as r])
-  (:import [java.net.http HttpClient HttpClient$Version HttpRequest HttpResponse$BodyHandlers HttpClient$Redirect HttpResponse HttpRequest$BodyPublisher HttpRequest$BodyPublishers HttpRequest$Builder]
+            [clojure.core.reducers :as r]
+            [cheshire.core :as json]
+            [clojure.java.io :as io])
+  (:import [java.net.http HttpClient HttpClient$Version HttpRequest HttpResponse$BodyHandlers HttpClient$Redirect HttpResponse HttpRequest$BodyPublisher HttpRequest$BodyPublishers HttpRequest$Builder HttpResponse$BodyHandler HttpHeaders]
            [java.net URI]
            [clojure.lang Keyword]
            [java.io File]
-           [java.nio.charset Charset])
+           [java.nio.charset Charset]
+           [java.util Map Map$Entry List])
   (:refer-clojure :exclude [get]))
+
+(set! *warn-on-reflection* true)
 
 (defprotocol ToFollowRedirects
   (to-follow-redirects [self]))
@@ -43,6 +48,69 @@
       ::version-http-1.1 HttpClient$Version/HTTP_1_1
       ::version-http-2 HttpClient$Version/HTTP_2
       (throw (IllegalArgumentException. (str "Unknown version: " self))))))
+
+(defmacro dot-builder-if
+  ([builder method value]
+   `(if-let [value# ~value]
+      (. ~builder ~(symbol method) value#)
+      ~builder))
+  ([builder method to-fn value]
+   `(if-let [value# (~to-fn ~value)]
+      (. ~builder ~(symbol method) value#)
+      ~builder)))
+
+(defn http-client ^HttpClient [& [{:keys [authenticator
+                                          connect-timeout
+                                          cookie-handler
+                                          executor
+                                          follow-redirects
+                                          priority
+                                          proxy
+                                          ssl-context
+                                          ssl-parameters
+                                          version]}]]
+  (let [builder (HttpClient/newBuilder)
+        builder (dot-builder-if builder :authenticator authenticator)
+        builder (dot-builder-if builder :connectTimeout connect-timeout)
+        builder (dot-builder-if builder :cookieHandler cookie-handler)
+        builder (dot-builder-if builder :executor executor)
+        builder (dot-builder-if builder :followRedirects to-follow-redirects follow-redirects)
+        builder (dot-builder-if builder :priority priority)
+        builder (dot-builder-if builder :proxy proxy)
+        builder (dot-builder-if builder :sslContext ssl-context)
+        builder (dot-builder-if builder :sslParameters ssl-parameters)
+        builder (dot-builder-if builder :version to-version version)]
+    (.build builder)))
+
+(defprotocol ToCharset
+  (to-charset ^Charset [self]))
+
+(extend-type Charset
+  ToCharset
+  (to-charset [self] self))
+
+(extend-type String
+  ToCharset
+  (to-charset [self]
+    (Charset/forName self)))
+
+(extend-type Keyword
+  ToCharset
+  (to-charset [self]
+    (Charset/forName (str/upper-case (name self)))))
+
+(defmulti value-to-mime identity)
+
+(defmacro defmime [keyword value]
+  `(defmethod value-to-mime ~keyword [~'_] ~value))
+
+(defmime :json "application/json")
+
+(defn to-mime [mime]
+  (and mime
+       (if (string? mime)
+         mime
+         (value-to-mime mime))))
 
 (defprotocol ToUri
   (to-uri ^URI [self]))
@@ -91,94 +159,25 @@
   (to-body-publisher [self]
     (HttpRequest$BodyPublishers/noBody)))
 
-(defprotocol ToCharset
-  (to-charset ^Charset [self]))
+(defprotocol ToBodyHandler
+  (to-body-handler [self]))
 
-(extend-type Charset
-  ToCharset
-  (to-charset [self] self))
-
-(extend-type String
-  ToCharset
-  (to-charset [self]
-    (Charset/forName self)))
+(extend-type HttpResponse$BodyHandler
+  ToBodyHandler
+  (to-body-handler [self] self))
 
 (extend-type Keyword
-  ToCharset
-  (to-charset [self]
-    (Charset/forName (str/upper-case (name self)))))
+  ToBodyHandler
+  (to-body-handler [self]
+    (case self
+      :string (HttpResponse$BodyHandlers/ofString)
+      :stream (HttpResponse$BodyHandlers/ofInputStream))))
 
-(defmacro dot-builder-if
-  ([builder method value]
-   `(if-let [value# ~value]
-      (. ~builder ~(symbol method) value#)
-      ~builder))
-  ([builder method to-fn value]
-   `(if-let [value# (~to-fn ~value)]
-      (. ~builder ~(symbol method) value#)
-      ~builder)))
-
-(defn http-client ^HttpClient [& [{:keys [authenticator
-                                          connect-timeout
-                                          cookie-handler
-                                          executor
-                                          follow-redirects
-                                          priority
-                                          proxy
-                                          ssl-context
-                                          ssl-parameters
-                                          version]}]]
-  (let [builder (HttpClient/newBuilder)
-        builder (dot-builder-if builder :authenticator authenticator)
-        builder (dot-builder-if builder :connectTimeout connect-timeout)
-        builder (dot-builder-if builder :cookieHandler cookie-handler)
-        builder (dot-builder-if builder :executor executor)
-        builder (dot-builder-if builder :followRedirects to-follow-redirects follow-redirects)
-        builder (dot-builder-if builder :priority priority)
-        builder (dot-builder-if builder :proxy proxy)
-        builder (dot-builder-if builder :sslContext ssl-context)
-        builder (dot-builder-if builder :sslParameters ssl-parameters)
-        builder (dot-builder-if builder :version to-version version)]
-    (.build builder)))
-
-(set! *warn-on-reflection* true)
-
-(defn string-body [string encoding]
-  (HttpRequest$BodyPublishers/ofString string (to-charset encoding)))
-
-(defn build-request ^HttpRequest [{:keys [method uri body content-type accept headers as]}]
-  (let [builder (HttpRequest/newBuilder)
-        builder (case method
-                  :get (.GET builder)
-                  :put (.PUT builder (to-body-publisher body))
-                  :post (.POST builder (to-body-publisher body))
-                  :delete (.DELETE builder)
-                  (.method builder (to-method method) (to-body-publisher body)))
-        builder (dot-builder-if builder :uri to-uri uri)]
-    (.build builder)))
-
-(defn raw-request ^HttpResponse [^HttpClient client ^HttpRequest request]
-  (.send client request (HttpResponse$BodyHandlers/ofString)))
-
-(defn request [^HttpClient client r]
-  (raw-request client (build-request r)))
-
-(comment
-  (def client (http-client {:follow-redirects ::redirect-normal
-                            :version          ::version-http-2}))
-
-  (raw-request client
-               (build-request {:method :head :uri "https://google.com"}))
-
-  (to-body-publisher nil)
-
-  (to-method :get)
-
-  )
-
-
-(defn get [^HttpClient client uri & [r]]
-  (request client (merge {:method :get :uri uri} r)))
+(defn string-body
+  ([string]
+   (to-body-publisher string))
+  ([string encoding]
+   (HttpRequest$BodyPublishers/ofString string (to-charset encoding))))
 
 (defn set-header [^HttpRequest$Builder builder ^String header-name ^String value]
   (.setHeader builder header-name value))
@@ -196,15 +195,15 @@
   ([m k1 v1 k2 v2]
    (assoc-if (assoc-if m k1 v1) k2 v2)))
 
-(defn leave-identity [_ m]
-  m)
-
-(defprotocol Interceptor
+(defprotocol RequestInterceptor
   (enter [self request-map])
   (leave! [self ^HttpRequest$Builder builder request-map]))
 
+(defprotocol ResponseInterceptor
+  (leave [self ^HttpResponse response response-map]))
+
 (deftype FunctionInterceptor [enter leave!]
-  Interceptor
+  RequestInterceptor
   (enter [self request-map]
     (if-let [enter (.-enter self)]
       (enter request-map)
@@ -214,22 +213,22 @@
       (leave! builder request-map))))
 
 (deftype HeadersInterceptor []
-  Interceptor
+  RequestInterceptor
   (enter [_ {:keys [accept content-type headers] :as request-map}]
     (assoc request-map :headers (assoc-if headers
-                                          "Accept" accept
-                                          "Content-Type" content-type)))
+                                          "Accept" (to-mime accept)
+                                          "Content-Type" (to-mime content-type))))
   (leave! [_ builder {:keys [headers]}]
     (set-headers builder headers)))
 
 (deftype UriInterceptor []
-  Interceptor
+  RequestInterceptor
   (enter [_ request-map] request-map)
   (leave! [_ builder {:keys [uri]}]
     (.uri ^HttpRequest$Builder builder (to-uri uri))))
 
 (deftype MethorInterceptor []
-  Interceptor
+  RequestInterceptor
   (enter [_ request-map] request-map)
   (leave! [_ builder {:keys [method body]}]
     (case method
@@ -240,11 +239,11 @@
       (.method ^HttpRequest$Builder builder (to-method method) (to-body-publisher body)))))
 
 (deftype JsonInterceptor []
-  Interceptor
+  RequestInterceptor
   (enter [_ request-map]
     (assoc request-map :as :json
-                       :accept "application/json"
-                       :content-type "application/json"))
+                       :accept :json
+                       :content-type :json))
   (leave! [_ _ _]))
 
 (def uri-interceptor
@@ -276,14 +275,46 @@
         (recur (dec x) (enter interceptor request-map)))
       (execute-leave interceptors (HttpRequest/newBuilder) request-map))))
 
+(defn convert-headers [^HttpHeaders headers]
+  (apply sorted-map-by
+         String/CASE_INSENSITIVE_ORDER
+         (mapcat (fn [^Map$Entry entry]
+                   (let [key (.getKey entry)]
+                     (if (not= key ":status")
+                       [key (let [^List value (.getValue entry)]
+                              (if (= (.size value) 1)
+                                (.get value 0)
+                                (vec value)))])))
+                 (.map headers))))
+
+(defn convert-raw-response [^HttpResponse raw-response]
+  {:status  (.statusCode raw-response)
+   :body    (.body raw-response)
+   :headers (convert-headers (.headers raw-response))})
+
+(defn request [^HttpClient client r]
+  (let [r                         (execute [uri-interceptor method-interceptor headers-interceptor] r)
+        ^HttpRequest http-request (::request r)
+        body-handler              (to-body-handler (or (:as r) :string))
+        raw-response              (.send client http-request body-handler)]
+    (if (:raw-response? r)
+      raw-response
+      (convert-raw-response raw-response))))
+
+
+(defn get [^HttpClient client uri & [r]]
+  (request client (merge {:method :get :uri uri} r)))
 
 (comment
-  (execute {::enter-interceptors [uri-interceptor headers-interceptor json-interceptor]
-            :uri                 "https://www.google.com"})
-  (def request-map (execute [uri-interceptor method-interceptor headers-interceptor json-interceptor]
-                            {:uri    "https://www.google.com"
-                             :method :post}))
-  (.method (::request request-map))
-  (.bodyPublisher (::request request-map))
+  (def client (http-client {:follow-redirects ::redirect-normal
+                            :version          ::version-http-2}))
 
+
+  (get-in (get client "https://www.google.com") [:headers "cache-control"])
+  (def headers (:headers *1))
+  (.firstValue headers "Cache-Control")
+  (.get (.map headers) "status")
+  (map identity (.map headers))
+
+  (apply sorted-map-by String/CASE_INSENSITIVE_ORDER ["a" 1])
   )
