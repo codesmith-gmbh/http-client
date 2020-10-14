@@ -23,13 +23,3 @@
       `(let [~@lets]
          (cond-> ~m
                  ~@assocs)))))
-
-
-(comment
-
-  (macroexpand '(some-assoc-> {} :a 1 :b 2))
-
-  (some-assoc-> {})
-
-  (gensym (str "v" 1 "_"))
-  )
