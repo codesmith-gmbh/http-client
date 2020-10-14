@@ -3,8 +3,7 @@
             [codesmith.http.client.body :as body]
             [codesmith.http.client.utils :refer [some-assoc->]]
             [codesmith.http.client.interceptor.protocols :as proto])
-  (:import [java.net.http HttpRequest$Builder HttpRequest HttpRequest$BodyPublishers]
-           [java.util Base64]))
+  (:import [java.net.http HttpRequest$Builder HttpRequest HttpRequest$BodyPublishers]))
 
 
 (defn- execute-leave! [interceptors ^HttpRequest$Builder builder request-map]
@@ -91,9 +90,6 @@
                            :body-publisher ((:body-publisher-for send-as) request-map))))
   (leave! [_ _ _]))
 
-(defn encode-base64 [^String text]
-  (.encodeToString (Base64/getEncoder) (.getBytes text)))
-
 (deftype AuthenticationHeaderInterceptor [^String authentication-header]
   proto/RequestInterceptor
   (enter [_ request-map]
@@ -115,5 +111,3 @@
 (def json-interceptor
   (->JsonInterceptor))
 
-(defn basic-authentication-interceptor [username password]
-  (->AuthenticationHeaderInterceptor (str "Basic " (encode-base64 (str username ":" password)))))
