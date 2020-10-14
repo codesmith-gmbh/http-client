@@ -1,27 +1,25 @@
 (ns codesmith.http.client.interceptor.response
-  (:require [clojure.core.reducers :as r])
+  (:require [clojure.core.reducers :as r]
+            [codesmith.http.client.interceptor.protocols :as proto])
   (:import [java.net.http HttpResponse HttpHeaders]
            [java.util Map$Entry List]))
 
-(defprotocol ResponseInterceptor
-  (leave [self request-map response response-map]))
-
 (defn execute-leave [interceptors request-map response]
   (let [response-map (r/reduce (fn [response-map interceptor]
-                                 (leave interceptor request-map response response-map))
+                                 (proto/leave interceptor request-map response response-map))
                                {}
                                interceptors)]
     (assoc response-map ::raw-response response)))
 
 (deftype StatusInterceptor []
-  ResponseInterceptor
+  proto/ResponseInterceptor
   (leave [_ _ response response-map]
     (assoc response-map :status (.statusCode ^HttpResponse response))))
 
 (deftype BodyInterceptor []
-  ResponseInterceptor
-  (leave [_ _ response response-map]
-    (assoc response-map :body (.body ^HttpResponse response))))
+  proto/ResponseInterceptor
+  (leave [_ {:keys [body-transform]} response response-map]
+    (assoc response-map :body ((or body-transform identity) (.body ^HttpResponse response)))))
 
 (defn convert-headers [^HttpHeaders headers]
   (apply sorted-map-by
@@ -36,12 +34,12 @@
                  (.map headers))))
 
 (deftype HeadersFullConversionInterceptor []
-  ResponseInterceptor
+  proto/ResponseInterceptor
   (leave [_ _ response response-map]
     (assoc response-map :headers (convert-headers (.headers ^HttpResponse response)))))
 
 (deftype HeadersTreeMapInterceptor []
-  ResponseInterceptor
+  proto/ResponseInterceptor
   (leave [_ _ response response-map]
     (assoc response-map :headers (.map (.headers ^HttpResponse response)))))
 

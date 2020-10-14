@@ -38,6 +38,6 @@
               (HttpResponse$BodyHandlers/ofInputStream)
               (fn [is]
                 (try
-                  (json/parse-stream (io/reader is))
+                  (json/parse-stream-strict (io/reader is) true)
                   (finally
                     (.close is))))))

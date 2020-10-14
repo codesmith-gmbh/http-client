@@ -1,20 +1,17 @@
 (ns codesmith.http.client.interceptor.request
   (:require [codesmith.http.client.coercion :as c]
             [codesmith.http.client.body :as body]
-            [codesmith.http.client.utils :refer [some-assoc->]])
+            [codesmith.http.client.utils :refer [some-assoc->]]
+            [codesmith.http.client.interceptor.protocols :as proto])
   (:import [java.net.http HttpRequest$Builder HttpRequest HttpRequest$BodyPublishers]))
 
-(defprotocol RequestInterceptor
-  ""
-  (enter [self request-map])
-  (leave! [self ^HttpRequest$Builder builder request-map]))
 
 (defn- execute-leave! [interceptors ^HttpRequest$Builder builder request-map]
   (let [interceptor-count (long (count interceptors))]
     (loop [x (long 0)]
       (when (< x interceptor-count)
         (let [interceptor (nth interceptors x)]
-          (leave! interceptor builder request-map)
+          (proto/leave! interceptor builder request-map)
           (recur (inc x)))))
     (assoc request-map ::raw-request (.build builder))))
 
@@ -23,11 +20,11 @@
          request-map request-map]
     (if (>= x 0)
       (let [interceptor (nth interceptors x)]
-        (recur (dec x) (enter interceptor request-map)))
+        (recur (dec x) (proto/enter interceptor request-map)))
       (execute-leave! interceptors (HttpRequest/newBuilder) request-map))))
 
 (deftype FunctionInterceptor [enter leave!]
-  RequestInterceptor
+  proto/RequestInterceptor
   (enter [self request-map]
     (if-let [enter (.-enter self)]
       (enter request-map)
@@ -47,7 +44,7 @@
       (set-header builder header-name values))))
 
 (deftype HeadersInterceptor []
-  RequestInterceptor
+  proto/RequestInterceptor
   (enter [_ {:keys [accept content-type headers] :as request-map}]
     (assoc request-map :headers (some-assoc-> headers
                                               "Accept" accept
@@ -56,7 +53,7 @@
     (set-headers builder headers)))
 
 (deftype UriInterceptor []
-  RequestInterceptor
+  proto/RequestInterceptor
   (enter [_ request-map] request-map)
   (leave! [_ builder {:keys [uri]}]
     (.uri ^HttpRequest$Builder builder (c/to-uri uri))))
@@ -65,7 +62,7 @@
   (or body-publisher (HttpRequest$BodyPublishers/noBody)))
 
 (deftype MethodInterceptor []
-  RequestInterceptor
+  proto/RequestInterceptor
   (enter [_ request-map] request-map)
   (leave! [_ builder {:keys [method body]}]
     (case method
@@ -76,20 +73,21 @@
       (.method ^HttpRequest$Builder builder (.toUpperCase (name method)) (body-publisher body)))))
 
 (deftype JsonInterceptor []
-  RequestInterceptor
+  proto/RequestInterceptor
   (enter [_ request-map]
     (assoc request-map :send-as body/send-as-json
                        :accept-as body/accept-as-json))
   (leave! [_ _ _]))
 
 (deftype BodyInterceptor []
-  RequestInterceptor
+  proto/RequestInterceptor
   (enter [_ {:keys [send-as accept-as] :as request-map}]
     (cond-> request-map
-            accept-as (assoc :accept (accept-as)
-                             :body-handler accept-as)
-            send-as (assoc :content-type (send-as)
-                           :body-provider (send-as request-map))))
+            accept-as (assoc :accept (:content-type accept-as)
+                             :body-handler (:body-handler accept-as)
+                             :body-transform (:body-transform accept-as))
+            send-as (assoc :content-type (:content-type send-as)
+                           :body-publisher ((:body-publisher-for send-as) request-map))))
   (leave! [_ _ _]))
 
 (def uri-interceptor
