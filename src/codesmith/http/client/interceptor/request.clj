@@ -79,6 +79,13 @@
                        :accept-as body/accept-as-json))
   (leave! [_ _ _]))
 
+(deftype EdnInterceptor []
+  proto/RequestInterceptor
+  (enter [_ request-map]
+    (assoc request-map :send-as body/send-as-edn
+                       :accept-as body/accept-as-edn))
+  (leave! [_ _ _]))
+
 (deftype BodyInterceptor []
   proto/RequestInterceptor
   (enter [_ {:keys [send-as accept-as] :as request-map}]
@@ -111,3 +118,5 @@
 (def json-interceptor
   (->JsonInterceptor))
 
+(def edn-interceptor
+  (->EdnInterceptor))
