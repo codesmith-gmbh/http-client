@@ -4,16 +4,61 @@
             [clojure.java.io :as io]
             [codesmith.http.client.interceptor.response :as ires]
             [codesmith.http.client.interceptor.dual :as dual]
-            [codesmith.http.client.interceptor.request :as ireq]))
+            [codesmith.http.client.interceptor.request :as ireq]
+            [codesmith.http.client.interceptor.protocols :as proto]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
-(comment
-  (def client (http/http-client {:follow-redirects     :redirect-normal
-                                 :version              :version-http-2
-                                 :request-interceptors [ireq/uri-interceptor ireq/method-interceptor ireq/headers-interceptor ireq/body-interceptor ireq/json-interceptor dual/measuring-interceptor]}))
 
-  (http/get client "http://localhost:9000/greet")
+(def token (atom nil))
+(def trials (atom 0))
+
+(defn refresh-token! [http-client]
+  (let [token-value (get-in
+                      (http/get http-client "http://localhost:9000/token")
+                      [:body :token])]
+    (println "refreshing!!!")
+    (reset! token token-value)))
+
+(deftype RefreshingTokenAuth [refresh-http-client]
+  proto/RequestInterceptor
+  (enter [_ request-map]
+    (when-not @token
+      (refresh-token! refresh-http-client))
+    (assoc-in request-map [:headers "authentication"] @token))
+  (leave! [_ _ _])
+
+  proto/ResponseInterceptor
+  (leave [_ request-map response {:keys [status] :as response-map}]
+    (if (and (= status 403))
+      (do
+        (refresh-token! refresh-http-client)
+        (assoc response-map ::retry true))
+      response-map)))
+
+
+(defn retry-get [http-client uri & [request-map]]
+  (let [response-map (http/get http-client uri request-map)]
+    (if (::retry response-map)
+      (do (println "RETRYING!!!")
+          (http/get http-client uri request-map))
+      response-map)))
+
+(comment
+  (def refreshing-client (http/http-client {:follow-redirects      :redirect-normal
+                                            :version               :version-http-2
+                                            :request-interceptors  [ireq/uri-interceptor ireq/method-interceptor ireq/headers-interceptor ireq/body-interceptor ireq/edn-interceptor dual/measuring-interceptor]
+                                            :response-interceptors [ires/status-interceptor ires/headers-full-conversion-interceptor ires/body-interceptor dual/measuring-interceptor]}))
+
+  (def refreshing-token-interceptor (->RefreshingTokenAuth refreshing-client))
+
+  (def client (http/http-client {:follow-redirects      :redirect-normal
+                                 :version               :version-http-2
+                                 :request-interceptors  [ireq/uri-interceptor ireq/method-interceptor ireq/headers-interceptor ireq/body-interceptor ireq/edn-interceptor refreshing-token-interceptor dual/measuring-interceptor]
+                                 :response-interceptors [ires/status-interceptor ires/headers-full-conversion-interceptor ires/body-interceptor refreshing-token-interceptor dual/measuring-interceptor]}))
+
+  (retry-get client "http://localhost:9000/greet")
+  token
 
   (get-in (http/head client "https://www.google.com") [:headers "cache-control"])
   (get-in [:headers "cache-control"])
