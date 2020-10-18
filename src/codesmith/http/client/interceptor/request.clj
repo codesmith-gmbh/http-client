@@ -34,6 +34,11 @@
       (leave! builder request-map))))
 
 (defn set-header [^HttpRequest$Builder builder ^String header-name ^String value]
+  (when-not header-name
+    (throw (ex-info "header-name must be defined" {:header-name header-name :value value})))
+  (when-not value
+    (throw (ex-info (str "value must be defined for header " header-name)
+                    {:header-name header-name :value value})))
   (.setHeader builder header-name value))
 
 (defn set-headers [builder headers]
