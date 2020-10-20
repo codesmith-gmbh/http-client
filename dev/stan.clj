@@ -2,10 +2,13 @@
   (:require [codesmith.http.client :as http]
             [cheshire.core :as json]
             [clojure.java.io :as io]
+            [codesmith.logger :as log]
             [codesmith.http.client.interceptor.response :as ires]
             [codesmith.http.client.interceptor.dual :as dual]
             [codesmith.http.client.interceptor.request :as ireq]
             [codesmith.http.client.interceptor.protocols :as proto]))
+
+(log/deflogger)
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -68,5 +71,7 @@
   (map identity (.map headers))
 
   (apply sorted-map-by String/CASE_INSENSITIVE_ORDER ["a" 1])
+
+  (log/debug-c {})
 
   )
